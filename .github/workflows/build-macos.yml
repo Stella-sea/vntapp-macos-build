@@ -35,7 +35,7 @@ jobs:
 
       - name: Build macOS app (release, no codesign)
         working-directory: VntApp
-        run: flutter build macos --release --no-codesign
+        run: flutter build macos --release
 
       - name: Package .dmg
         run: |
