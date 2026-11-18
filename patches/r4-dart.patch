@@ -1,0 +1,226 @@
+--- a/lib/main.dart
++++ b/lib/main.dart
+@@ -17,13 +17,60 @@
+ import 'package:flutter/services.dart' show rootBundle;
+ import 'package:system_tray/system_tray.dart';
+ import 'package:window_manager/window_manager.dart';
++import 'package:path_provider/path_provider.dart';
+ 
+ final SystemTray systemTray = SystemTray();
+ final AppWindow appWindow = AppWindow();
+ 
++/// 把工作目录固定到应用支持目录,避免相对路径 logs/ 因启动方式不同而找不到
++Future<void> setupStableWorkDir() async {
++  if (!Platform.isMacOS && !Platform.isLinux && !Platform.isWindows) {
++    return;
++  }
++  final dir = await getApplicationSupportDirectory();
++  if (!dir.existsSync()) {
++    await dir.create(recursive: true);
++  }
++  Directory.current = dir;
++}
++
++/// 当前是否以 root/管理员身份运行(macOS 上建虚拟网卡需要 root)
++Future<bool> isRunningAsRoot() async {
++  if (!Platform.isMacOS) return true;
++  try {
++    final result = await Process.run('id', ['-u']);
++    return result.stdout.toString().trim() == '0';
++  } catch (_) {
++    return false;
++  }
++}
++
++/// 用系统密码框以管理员身份重新启动当前应用(macOS)
++/// 用 setsid 把新进程完全脱离到新会话,避免 osascript 的提权助手退出时
++/// 把后台启动的新实例一起清理掉(之前 nohup & 会闪退就是这个原因)。
++/// 系统密码框在带 Touch ID 的 Mac 上会提供指纹选项。
++Future<bool> relaunchAsAdmin() async {
++  if (!Platform.isMacOS) return false;
++  final exe = Platform.resolvedExecutable;
++  try {
++    final script =
++        'do shell script "setsid \\"$exe\\" > /dev/null 2>&1 < /dev/null &" with administrator privileges';
++    final result = await Process.run('osascript', ['-e', script]);
++    return result.exitCode == 0;
++  } catch (e) {
++    debugPrint('relaunchAsAdmin error: $e');
++    return false;
++  }
++}
++
+ Future<void> main() async {
+   WidgetsFlutterBinding.ensureInitialized(); // 确保Flutter框架已初始化
+   try {
++    await setupStableWorkDir();
++  } catch (e) {
++    debugPrint('setupStableWorkDir catch $e');
++  }
++  try {
+     await copyLogConfig();
+   } catch (e) {
+     debugPrint('copyLogConfig catch $e');
+@@ -92,13 +139,13 @@
+     MenuItemLabel(
+       label: '打开',
+       onClicked: (menuItem) {
+-        appWindow.show();
++        windowManager.show();
+       },
+     ),
+     MenuItemLabel(
+       label: '隐藏',
+       onClicked: (menuItem) {
+-        appWindow.hide();
++        windowManager.hide();
+       },
+     ),
+     MenuItemLabel(
+@@ -152,6 +199,12 @@
+ 
+       windowManager.addListener(this);
+     }
++    // macOS:不是 root 时提示用系统密码框以管理员身份重启(建虚拟网卡需要 root)
++    if (Platform.isMacOS) {
++      WidgetsBinding.instance.addPostFrameCallback((_) {
++        _maybePromptAdmin();
++      });
++    }
+ 
+     _loadData().then((v) async {
+       var isAuto = await _dataPersistence.loadAutoConnect() ?? false;
+@@ -203,6 +256,47 @@
+     DataPersistence().saveWindowSize(size);
+   }
+ 
++  Future<void> _maybePromptAdmin() async {
++    if (!mounted) return;
++    if (await isRunningAsRoot()) return;
++    if (!mounted) return;
++    final relaunch = await showDialog<bool>(
++      context: context,
++      barrierDismissible: true,
++      builder: (context) => AlertDialog(
++        title: const Text('需要管理员权限'),
++        content: const Text('''创建虚拟网卡需要管理员权限。
++
++点“以管理员身份重新启动”，系统会弹出密码框，输密码后应用会以管理员身份重新打开，之后连接就不需要再输密码了。
++
++也可以点“暂不”，先用着，但连接时会报权限错误。'''),
++        actions: [
++          TextButton(
++            onPressed: () => Navigator.of(context).pop(false),
++            child: const Text('暂不'),
++          ),
++          TextButton(
++            onPressed: () => Navigator.of(context).pop(true),
++            child: const Text('以管理员身份重新启动'),
++          ),
++        ],
++      ),
++    );
++    if (relaunch == true) {
++      final ok = await relaunchAsAdmin();
++      if (ok) {
++        // 给新实例一点时间启动,再退出旧实例
++        await Future.delayed(const Duration(milliseconds: 800));
++        exit(0);
++      } else {
++        if (!mounted) return;
++        ScaffoldMessenger.of(context).showSnackBar(
++          const SnackBar(content: Text('未能以管理员身份启动，请用终端 sudo 打开')),
++        );
++      }
++    }
++  }
++
+   @override
+   void onWindowClose() async {
+     var isClose = await DataPersistence().loadCloseApp();
+@@ -215,7 +309,7 @@
+         windowManager.setPreventClose(false);
+         appWindow.close();
+       } else {
+-        appWindow.hide();
++        windowManager.hide();
+       }
+     }
+   }
+@@ -475,8 +569,29 @@
+             break;
+           default:
+             _closeVnt(itemKey);
++            final rawMsg = msg.msg ?? '';
++            final isPermError = rawMsg.contains('PermissionDenied') ||
++                rawMsg.contains('Operation not permitted') ||
++                rawMsg.contains('create device');
+             ScaffoldMessenger.of(context).showSnackBar(
+-              SnackBar(content: Text('未知错误 ${msg.msg} [$configName]')),
++              SnackBar(
++                content: Text(isPermError
++                    ? '创建虚拟网卡失败：需要管理员权限 [$configName]'
++                    : '未知错误 $rawMsg [$configName]'),
++                action: isPermError
++                    ? SnackBarAction(
++                        label: '管理员重启',
++                        onPressed: () async {
++                          final ok = await relaunchAsAdmin();
++                          if (ok) {
++                            await Future.delayed(
++                                const Duration(milliseconds: 800));
++                            exit(0);
++                          }
++                        },
++                      )
++                    : null,
++              ),
+             );
+         }
+       } else if (msg is RustConnectInfo) {
+--- a/lib/connect_log.dart
++++ b/lib/connect_log.dart
+@@ -25,12 +25,19 @@
+   Future<void> _loadMoreLogs() async {
+     if (_isLoading) return;
+     setState(() => _isLoading = true);
+-
+-    final newLines = await _logReader.readNextBatch();
+-    setState(() {
+-      _logLines.addAll(newLines);
+-      _isLoading = false;
+-    });
++    try {
++      final newLines = await _logReader.readNextBatch();
++      if (!mounted) return;
++      setState(() {
++        _logLines.addAll(newLines);
++      });
++    } catch (e) {
++      debugPrint('load logs error: $e');
++    } finally {
++      if (mounted) {
++        setState(() => _isLoading = false);
++      }
++    }
+   }
+ 
+   void _onScroll() {
+@@ -100,7 +107,16 @@
+ 
+   Future<List<String>> readNextBatch() async {
+     final lines = <String>[];
+-    var fileLength = await logFile.length();
++    int fileLength;
++    try {
++      if (!await logFile.exists()) {
++        return lines;
++      }
++      fileLength = await logFile.length();
++    } catch (e) {
++      debugPrint('log file length error: $e');
++      return lines;
++    }
+     if (_currentOffset >= fileLength) {
+       // 如果偏移量超过文件长度，说明已经读取完毕
+       return lines;

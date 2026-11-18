@@ -25,7 +25,7 @@ jobs:
       - name: Apply r3 patches
         run: |
           cd VntApp
-          git apply ../patches/r3-dart.patch
+          git apply ../patches/r4-dart.patch
           echo "--- patched markers ---"
           grep -n "relaunchAsAdmin\|setupStableWorkDir" lib/main.dart | head -5
           grep -n "logFile.exists" lib/connect_log.dart | head -3
@@ -58,21 +58,21 @@ jobs:
         run: |
           APP="VntApp/build/macos/Build/Products/Release/vnt_app.app"
           ls -la "$APP"
-          hdiutil create -volname "VntApp 1.2.13" -srcfolder "$APP" -ov -format UDZO "VntApp-1.2.13-macos-arm64-r3.dmg"
-          ls -lh VntApp-1.2.13-macos-arm64-r3.dmg
-          shasum -a 256 VntApp-1.2.13-macos-arm64-r3.dmg
+          hdiutil create -volname "VntApp 1.2.13" -srcfolder "$APP" -ov -format UDZO "VntApp-1.2.13-macos-arm64-r4.dmg"
+          ls -lh VntApp-1.2.13-macos-arm64-r4.dmg
+          shasum -a 256 VntApp-1.2.13-macos-arm64-r4.dmg
 
       - name: Upload .dmg artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VntApp-1.2.13-macos-arm64-r3.dmg
-          path: VntApp-1.2.13-macos-arm64-r3.dmg
+          name: VntApp-1.2.13-macos-arm64-r4.dmg
+          path: VntApp-1.2.13-macos-arm64-r4.dmg
 
       - name: Create GitHub Release with .dmg
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.13-macos-arm64-r3
-          name: VntApp 1.2.13 macOS (Apple Silicon) r3
+          tag_name: v1.2.13-macos-arm64-r4
+          name: VntApp 1.2.13 macOS (Apple Silicon) r4
           body: |
             Unofficial macOS (Apple Silicon / arm64) build of VntApp 1.2.13 (Flutter), built from vnt-dev/VntApp @ 1.2.13 + r3 patches.
             r3 fixes:
@@ -82,6 +82,6 @@ jobs:
             - Permission errors show a friendly message with a one-tap admin relaunch button.
             - App sandbox entitlement removed so the TUN/utun interface can be created.
             Unsigned - on first launch, right-click the app and choose Open (Gatekeeper bypass).
-          files: VntApp-1.2.13-macos-arm64-r3.dmg
+          files: VntApp-1.2.13-macos-arm64-r4.dmg
           draft: false
           prerelease: true
