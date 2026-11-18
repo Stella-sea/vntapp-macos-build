@@ -19,6 +19,12 @@ jobs:
           ref: '1.2.13'
           path: VntApp
 
+      - name: Strip app-sandbox entitlement (blocks TUN/utun creation)
+        run: |
+          /usr/libexec/PlistBuddy -c "Delete :com.apple.security.app-sandbox" VntApp/macos/Runner/Release.entitlements
+          echo "--- Release.entitlements after strip ---"
+          cat VntApp/macos/Runner/Release.entitlements
+
       - name: Install Flutter 3.24.5
         uses: subosito/flutter-action@v2
         with:
@@ -41,24 +47,24 @@ jobs:
         run: |
           APP="VntApp/build/macos/Build/Products/Release/vnt_app.app"
           ls -la "$APP"
-          hdiutil create -volname "VntApp 1.2.13" -srcfolder "$APP" -ov -format UDZO "VntApp-1.2.13-macos-arm64.dmg"
-          ls -lh VntApp-1.2.13-macos-arm64.dmg
-          shasum -a 256 VntApp-1.2.13-macos-arm64.dmg
+          hdiutil create -volname "VntApp 1.2.13" -srcfolder "$APP" -ov -format UDZO "VntApp-1.2.13-macos-arm64-r2.dmg"
+          ls -lh VntApp-1.2.13-macos-arm64-r2.dmg
+          shasum -a 256 VntApp-1.2.13-macos-arm64-r2.dmg
 
       - name: Upload .dmg artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VntApp-1.2.13-macos-arm64.dmg
-          path: VntApp-1.2.13-macos-arm64.dmg
+          name: VntApp-1.2.13-macos-arm64-r2.dmg
+          path: VntApp-1.2.13-macos-arm64-r2.dmg
 
       - name: Create GitHub Release with .dmg
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.13-macos-arm64
-          name: VntApp 1.2.13 macOS (Apple Silicon)
+          tag_name: v1.2.13-macos-arm64-r2
+          name: VntApp 1.2.13 macOS (Apple Silicon) r2
           body: |
             Unofficial macOS (Apple Silicon / arm64) build of VntApp 1.2.13 (Flutter), built from vnt-dev/VntApp @ 1.2.13.
             Unsigned - on first launch, right-click the app and choose Open (Gatekeeper bypass).
-          files: VntApp-1.2.13-macos-arm64.dmg
+          files: VntApp-1.2.13-macos-arm64-r2.dmg
           draft: false
           prerelease: true
