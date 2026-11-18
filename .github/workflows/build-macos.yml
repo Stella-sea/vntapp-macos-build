@@ -12,12 +12,23 @@ jobs:
   build-macos:
     runs-on: macos-15
     steps:
+      - name: Checkout build repo (patches)
+        uses: actions/checkout@v4
+
       - name: Checkout VntApp 1.2.13 source
         uses: actions/checkout@v4
         with:
           repository: vnt-dev/VntApp
           ref: '1.2.13'
           path: VntApp
+
+      - name: Apply r3 patches
+        run: |
+          cd VntApp
+          git apply ../patches/r3-dart.patch
+          echo "--- patched markers ---"
+          grep -n "relaunchAsAdmin\|setupStableWorkDir" lib/main.dart | head -5
+          grep -n "logFile.exists" lib/connect_log.dart | head -3
 
       - name: Strip app-sandbox entitlement (blocks TUN/utun creation)
         run: |
@@ -39,7 +50,7 @@ jobs:
         working-directory: VntApp
         run: flutter pub get
 
-      - name: Build macOS app (release, no codesign)
+      - name: Build macOS app (release)
         working-directory: VntApp
         run: flutter build macos --release
 
@@ -47,24 +58,30 @@ jobs:
         run: |
           APP="VntApp/build/macos/Build/Products/Release/vnt_app.app"
           ls -la "$APP"
-          hdiutil create -volname "VntApp 1.2.13" -srcfolder "$APP" -ov -format UDZO "VntApp-1.2.13-macos-arm64-r2.dmg"
-          ls -lh VntApp-1.2.13-macos-arm64-r2.dmg
-          shasum -a 256 VntApp-1.2.13-macos-arm64-r2.dmg
+          hdiutil create -volname "VntApp 1.2.13" -srcfolder "$APP" -ov -format UDZO "VntApp-1.2.13-macos-arm64-r3.dmg"
+          ls -lh VntApp-1.2.13-macos-arm64-r3.dmg
+          shasum -a 256 VntApp-1.2.13-macos-arm64-r3.dmg
 
       - name: Upload .dmg artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VntApp-1.2.13-macos-arm64-r2.dmg
-          path: VntApp-1.2.13-macos-arm64-r2.dmg
+          name: VntApp-1.2.13-macos-arm64-r3.dmg
+          path: VntApp-1.2.13-macos-arm64-r3.dmg
 
       - name: Create GitHub Release with .dmg
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.13-macos-arm64-r2
-          name: VntApp 1.2.13 macOS (Apple Silicon) r2
+          tag_name: v1.2.13-macos-arm64-r3
+          name: VntApp 1.2.13 macOS (Apple Silicon) r3
           body: |
-            Unofficial macOS (Apple Silicon / arm64) build of VntApp 1.2.13 (Flutter), built from vnt-dev/VntApp @ 1.2.13.
+            Unofficial macOS (Apple Silicon / arm64) build of VntApp 1.2.13 (Flutter), built from vnt-dev/VntApp @ 1.2.13 + r3 patches.
+            r3 fixes:
+            - In-app admin request: on macOS, if not running as root, the app offers to relaunch as admin via the system password dialog (no Terminal needed).
+            - Tray hide now truly hides the window (was minimizing to Dock).
+            - Log page no longer spins forever when the log file is missing; logs are stored under the app support directory.
+            - Permission errors show a friendly message with a one-tap admin relaunch button.
+            - App sandbox entitlement removed so the TUN/utun interface can be created.
             Unsigned - on first launch, right-click the app and choose Open (Gatekeeper bypass).
-          files: VntApp-1.2.13-macos-arm64-r2.dmg
+          files: VntApp-1.2.13-macos-arm64-r3.dmg
           draft: false
           prerelease: true
