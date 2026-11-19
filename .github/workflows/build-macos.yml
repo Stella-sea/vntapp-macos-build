@@ -22,17 +22,18 @@ jobs:
           ref: '1.2.13'
           path: VntApp
 
-      - name: Apply r3 patches
+      - name: Apply r6 patches
         run: |
           cd VntApp
-          git apply ../patches/r5-dart.patch
+          git apply ../patches/r6-dart.patch
           echo "--- patched markers ---"
-          grep -n "relaunchAsAdmin\|setupStableWorkDir" lib/main.dart | head -5
+          grep -n "relaunchAsAdmin\|setupStableWorkDir\|vnt-ready-token\|adminRelaunchInProgress" lib/main.dart | head -8
           grep -n "logFile.exists" lib/connect_log.dart | head -3
+          grep -n "return false" macos/Runner/AppDelegate.swift | head -3
 
       - name: Strip app-sandbox entitlement (blocks TUN/utun creation)
         run: |
-          /usr/libexec/PlistBuddy -c "Delete :com.apple.security.app-sandbox" VntApp/macos/Runner/Release.entitlements
+          /usr/libexec/PlistBuddy -c "Delete :com.apple.security.app-sandbox" VntApp/macos/Runner/Release.entitlements || true
           echo "--- Release.entitlements after strip ---"
           cat VntApp/macos/Runner/Release.entitlements
 
@@ -50,6 +51,11 @@ jobs:
         working-directory: VntApp
         run: flutter pub get
 
+      - name: Flutter analyze (non-blocking, log only)
+        working-directory: VntApp
+        run: flutter analyze
+        continue-on-error: true
+
       - name: Build macOS app (release)
         working-directory: VntApp
         run: flutter build macos --release
@@ -58,30 +64,34 @@ jobs:
         run: |
           APP="VntApp/build/macos/Build/Products/Release/vnt_app.app"
           ls -la "$APP"
-          hdiutil create -volname "VntApp 1.2.13" -srcfolder "$APP" -ov -format UDZO "VntApp-1.2.13-macos-arm64-r5.dmg"
-          ls -lh VntApp-1.2.13-macos-arm64-r5.dmg
-          shasum -a 256 VntApp-1.2.13-macos-arm64-r5.dmg
+          echo "--- binary architectures (must be arm64) ---"
+          lipo -archs "$APP/Contents/MacOS/vnt_app"
+          lipo -archs "$APP/Contents/MacOS/vnt_app" | grep -q arm64
+          echo "--- entitlements (unsigned build, informational) ---"
+          codesign -d --entitlements :- "$APP" 2>&1 | head -20 || true
+          hdiutil create -volname "VntApp 1.2.13" -srcfolder "$APP" -ov -format UDZO "VntApp-1.2.13-macos-arm64-r6.dmg"
+          ls -lh VntApp-1.2.13-macos-arm64-r6.dmg
+          shasum -a 256 VntApp-1.2.13-macos-arm64-r6.dmg
 
       - name: Upload .dmg artifact
         uses: actions/upload-artifact@v4
         with:
-          name: VntApp-1.2.13-macos-arm64-r5.dmg
-          path: VntApp-1.2.13-macos-arm64-r5.dmg
+          name: VntApp-1.2.13-macos-arm64-r6.dmg
+          path: VntApp-1.2.13-macos-arm64-r6.dmg
 
       - name: Create GitHub Release with .dmg
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.2.13-macos-arm64-r5
-          name: VntApp 1.2.13 macOS (Apple Silicon) r5
+          tag_name: v1.2.13-macos-arm64-r6
+          name: VntApp 1.2.13 macOS (Apple Silicon) r6
           body: |
-            Unofficial macOS (Apple Silicon / arm64) build of VntApp 1.2.13 (Flutter), built from vnt-dev/VntApp @ 1.2.13 + r3 patches.
-            r3 fixes:
-            - In-app admin request: on macOS, if not running as root, the app offers to relaunch as admin via the system password dialog (no Terminal needed).
-            - Tray hide now truly hides the window (was minimizing to Dock).
-            - Log page no longer spins forever when the log file is missing; logs are stored under the app support directory.
-            - Permission errors show a friendly message with a one-tap admin relaunch button.
-            - App sandbox entitlement removed so the TUN/utun interface can be created.
+            Unofficial macOS (Apple Silicon / arm64) build of VntApp 1.2.13 (Flutter), built from vnt-dev/VntApp @ 1.2.13 + r6 patches.
+            r6 fixes (on top of r5):
+            - Tray: all window hide/show/close now go through window_manager; the app no longer quits when its last window closes (AppDelegate returns false) — hiding to tray keeps the process and VPN connection alive. Tray Quit and the close dialog's "close app" path disconnect all connections first, then quit explicitly.
+            - Admin relaunch: the old 800ms blind wait is replaced by a ready-file handshake — the new admin instance writes a ready file with a random token once its window is shown; the old instance only exits after seeing it (30s timeout, otherwise it stays and shows an error instead of flashing away).
+            - Config handover: before relaunch, the root shell copies the console user's SharedPreferences plist to root's plist (only when the user copy exists and is newer), so configs, unique ID and preferences survive the user -> root switch.
+            - Still requires the system password on every cold start (no Touch ID / password-free launch yet — that needs a privileged helper, future work).
             Unsigned - on first launch, right-click the app and choose Open (Gatekeeper bypass).
-          files: VntApp-1.2.13-macos-arm64-r5.dmg
+          files: VntApp-1.2.13-macos-arm64-r6.dmg
           draft: false
           prerelease: true
